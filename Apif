@@ -137,7 +137,7 @@ function api:Start()
 	task.spawn(function()
 		lasttime = ostime()
 		while env.lasttime do
-			env.timer = (ostime() - env.lasttime) * 2
+			env.timer = (ostime() - env.lasttime) * 3
 			--print(string.format("Timer: %.1f | Wave: %d", timer, waveinfo))
 			
 			taskwait(0.25)
