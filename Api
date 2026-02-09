@@ -119,7 +119,7 @@ function api:Loop(func)
 end
 
 function api:Start()
-	bytenet.Timescale.SetTimescale.send(2)
+	bytenet.Timescale.SetTimescale.send(3)
 
 	env.waveinfo = mapinfo:GetAttribute("Wave") or 1
 	env.timer = 0
