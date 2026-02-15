@@ -1,11 +1,11 @@
--- Shitty X Unified Macro (UI + Recorder + Player) - Fixed
+-- Shitty X Unified Macro (UI + Recorder + Player) - Fixed with Combo instead of Dropdown
 
 -- Services
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local LP = Players.LocalPlayer
 
--- UI Library (same as lol.txt)
+-- UI Library
 local library = loadstring(game:HttpGet('https://raw.githubusercontent.com/ovoch228/depthsoimgui/refs/heads/main/library'))()
 
 -- ByteNet / Services
@@ -79,21 +79,6 @@ rectab:InputText({
 	end
 })
 
-local writebutton = filetab:Button({
-  	Text = "Write File",
-    	Callback = function()
-   		writefile(getgenv().StratName .. '.txt',
-    			"local api = loadstring(game:HttpGet('https://raw.githubusercontent.com/ovoch228/shitty-x/refs/heads/main/rtd/api'))()\n\n" .. 
-    			`api:Loadout({plrtowers})\n` ..
-    			`api:Map('{map}', {modifiers})\n\n` ..
-    			"api:Start()\n\n" ..
-    			"api:Loop(function()\n"
-    		)
-        	
-        	getgenv().destroyui = true
- 	end
-})
-
 -- Logs
 local loglabel = logstab:Label({ Label = "Last Log: Idle" })
 logstab:Separator({ Text = "Logs:" })
@@ -121,19 +106,37 @@ local function getMacros()
 	return files
 end
 
-local macroDropdown = playtab:Dropdown({
-	Label = "Select Macro",
-	Items = getMacros(),
-	Callback = function(v)
-		env.selectedMacro = v
+-- Macro selection (using Combo instead of Dropdown)
+local macroCombo
+
+local function createMacroCombo()
+	local files = getMacros()
+	
+	-- Clean up old combo if exists
+	if macroCombo and macroCombo.Remove then
+		macroCombo:Remove()
+	elseif macroCombo and macroCombo.Destroy then
+		macroCombo:Destroy()
 	end
-})
+	
+	macroCombo = playtab:Combo({
+		Label = "Select Macro",
+		Placeholder = "Choose macro... (" .. #files .. " found)",
+		Items = files,
+		Callback = function(self, value)
+			env.selectedMacro = value
+			updatelog("Macro selected: " .. (value or "none"))
+		end
+	})
+end
+
+createMacroCombo()  -- Create initially
 
 playtab:Button({
 	Text = "Refresh Macros",
 	Callback = function()
-		macroDropdown:SetItems(getMacros())
-		updatelog("Macro list refreshed")
+		createMacroCombo()
+		updatelog("Macro list refreshed (" .. #getMacros() .. " items)")
 	end
 })
 
@@ -144,12 +147,22 @@ playtab:Button({
 			updatelog("No macro selected")
 			return
 		end
-		updatelog("Playing macro: " .. env.selectedMacro)
-		loadstring(readfile(env.selectedMacro))()
+		
+		updatelog("Attempting to play: " .. env.selectedMacro)
+		
+		local success, err = pcall(function()
+			loadstring(readfile(env.selectedMacro))()
+		end)
+		
+		if success then
+			updatelog("Macro started successfully")
+		else
+			updatelog("Error running macro: " .. tostring(err))
+		end
 	end
 })
 
--- API
+-- API (unchanged)
 local api = {}
 
 local function waitTime(t, w)
@@ -254,12 +267,12 @@ rectab:Button({
 			appendfile(env.StratName .. ".txt", "end)\n")
 			env.recording = false
 			updatelog("Recording stopped")
-			macroDropdown:SetItems(getMacros())
+			createMacroCombo()  -- refresh combo after new file created
 		end
 	end
 })
 
--- Hooks
+-- Hooks (unchanged)
 local hooks = {}
 
 local function record(line)
@@ -304,5 +317,5 @@ hooks.autoskip = hookfunction(bytenet.SkipWave.ToggleAutoSkip.send, function(v)
 	return hooks.autoskip(v)
 end)
 
-updatelog("Macro UI loaded")
+updatelog("Macro UI loaded (with Combo fix)")
 window:ShowTab(playtab)
