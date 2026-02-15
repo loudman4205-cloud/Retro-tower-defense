@@ -119,7 +119,7 @@ function api:Loop(func)
 end
 
 function api:Start()
-	bytenet.Timescale.SetTimescale.send(2.7)
+	bytenet.Timescale.SetTimescale.send(3)
 
 	env.waveinfo = mapinfo:GetAttribute("Wave") or 1
 	env.timer = 0
@@ -137,7 +137,7 @@ function api:Start()
 	task.spawn(function()
 		lasttime = ostime()
 		while env.lasttime do
-			env.timer = (ostime() - env.lasttime) * 2.7
+			env.timer = (ostime() - env.lasttime) * 3
 			--print(string.format("Timer: %.1f | Wave: %d", timer, waveinfo))
 			
 			taskwait(0.25)
