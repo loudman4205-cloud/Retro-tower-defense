@@ -79,6 +79,21 @@ rectab:InputText({
 	end
 })
 
+local writebutton = filetab:Button({
+  	Text = "Write File",
+    	Callback = function()
+   		writefile(getgenv().StratName .. '.txt',
+    			"local api = loadstring(game:HttpGet('https://raw.githubusercontent.com/ovoch228/shitty-x/refs/heads/main/rtd/api'))()\n\n" .. 
+    			`api:Loadout({plrtowers})\n` ..
+    			`api:Map('{map}', {modifiers})\n\n` ..
+    			"api:Start()\n\n" ..
+    			"api:Loop(function()\n"
+    		)
+        	
+        	getgenv().destroyui = true
+ 	end
+})
+
 -- Logs
 local loglabel = logstab:Label({ Label = "Last Log: Idle" })
 logstab:Separator({ Text = "Logs:" })
