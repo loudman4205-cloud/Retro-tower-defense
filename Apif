@@ -1,30 +1,25 @@
--- Shitty X API - FIXED: Lobby/Game Safe + Precise Timing
--- Fixes: nil 'EquipTower' (use bytenet.Inventory), lobby detection, service waits
--- Compatible with macros (Loadout/Map only in lobby PlaceId 98936097545088)
+-- Shitty X API - Crash-Fixed: No nil cursor spam, UI-safe, lobby/game aware
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local LP = Players.LocalPlayer
 
--- Lobby PlaceId (from research: Retro TD)
-local LOBBY_PLACE_ID = 98936097545088
+local LOBBY_PLACE_ID = 98936097545088  -- Confirmed from game page
 
--- Safe service loading
-local success, teamwork = pcall(RS.WaitForChild, RS, "Teawork", 10)
-if not success then error("Teawork not found - wrong game?") end
+local teamwork = RS:WaitForChild("Teawork", 15)
+if not teamwork then error("Teawork missing - wrong game?") end
 
-local client = teamwork:WaitForChild("Client", 5)
-local shared = teamwork:WaitForChild("Shared", 5)
+local client = teamwork:WaitForChild("Client", 10)
+local shared = teamwork:WaitForChild("Shared", 10)
 
 local bytenet = require(shared.Services.ByteNetworking)
 local modifiersmodule = require(client.Services.Game.ModifierController)
 local datamodule = require(client.Services.DataSync)
 
-local towers = bytenet.Towers  -- In-game only
+local towers = bytenet.Towers
 local mapinfo = RS:WaitForChild("RoundInfo", 10)
 local roundresultui = LP.PlayerGui:WaitForChild("GameUI"):WaitForChild("RoundResult", 10)
 
--- Global env (matches UI script)
 local env = getgenv()
 env.timer = 0
 env.wave = mapinfo:GetAttribute("Wave") or 1
@@ -34,7 +29,7 @@ env.totalplaced = 0
 env.firsttower = 1
 env.isroundover = false
 
--- Precise Timer
+-- Timer
 task.spawn(function()
     local last = os.time()
     while true do
@@ -43,7 +38,6 @@ task.spawn(function()
     end
 end)
 
--- Trackers
 mapinfo:GetAttributeChangedSignal("Wave"):Connect(function()
     env.wave = mapinfo:GetAttribute("Wave")
 end)
@@ -52,107 +46,127 @@ roundresultui:GetPropertyChangedSignal("Visible"):Connect(function()
     env.isroundover = roundresultui.Visible
 end)
 
--- API
 local api = {}
 
 local function waitTime(t, w)
-    while env.wave < w and not env.isroundover do task.wait(0.03) end
-    while env.timer < t and not env.isroundover do task.wait(0.03) end
+    local start = tick()
+    while (env.wave < w or env.timer < t) and not env.isroundover and tick() - start < 60 do
+        task.wait(0.03)
+    end
     return not env.isroundover
 end
 
--- FIXED Loadout: Lobby-only + correct remote (bytenet.Inventory, not towers.Inventory)
 function api:Loadout(towersList)
     if game.PlaceId ~= LOBBY_PLACE_ID then
-        print("[API] Loadout skipped: In-game (PlaceId " .. game.PlaceId .. ")")
+        print("[API] Loadout skipped: In-game")
         return
     end
-    
     towersList = towersList or {}
-    local equipped = 0
-    for slot, towerID in ipairs(towersList) do
-        local ok = pcall(bytenet.Inventory.EquipTower.invoke, bytenet.Inventory.EquipTower, {TowerID = towerID, Slot = slot})
-        if ok then equipped += 1 end
-        task.wait(0.45)
+    local count = 0
+    for slot, id in ipairs(towersList) do
+        pcall(function()
+            bytenet.Inventory.EquipTower.invoke({TowerID = id, Slot = slot})
+        end)
+        task.wait(0.5)
+        count += 1
     end
-    print("[API] Loadout: " .. equipped .. "/" .. #towersList .. " towers equipped")
+    print("[API] Loadout: " .. count .. " towers")
 end
 
-function api:Map(mapName, modsList)
+function api:Map(mapName, mods)
     if game.PlaceId ~= LOBBY_PLACE_ID then
-        print("[API] Map skipped: Not in lobby")
+        print("[API] Map skipped: Not lobby")
         return
     end
-    -- Create match (from ov och API)
-    pcall(bytenet.MatchmakingNew.CreateSingleplayer.invoke, bytenet.MatchmakingNew.CreateSingleplayer, {
-        Gamemode = "Standard",
-        MapID = mapName,
-        Modifiers = modsList or {}
-    })
-    print("[API] Created match: " .. mapName)
+    pcall(function()
+        bytenet.MatchmakingNew.CreateSingleplayer.invoke({
+            Gamemode = "Standard",
+            MapID = mapName,
+            Modifiers = mods or {}
+        })
+    end)
+    print("[API] Map created: " .. mapName)
 end
 
 function api:Start()
-    pcall(bytenet.Timescale.SetTimescale.send, bytenet.Timescale.SetTimescale, 2)
-    print("[API] Started (2x speed)")
+    pcall(bytenet.Timescale.SetTimescale.send, 2)
+    print("[API] Started")
 end
 
-function api:Ready(t, w) if waitTime(t, w) then bytenet.ReadyVote.Vote.send(true) end end
+-- Safe action wrappers (prevent spam/crash)
+local function safeInvoke(remote, ...)
+    pcall(function() remote.invoke(...) end)
+end
+
+local function safeSend(remote, ...)
+    pcall(function() remote.send(...) end)
+end
+
+function api:Ready(t, w) if waitTime(t, w) then safeSend(bytenet.ReadyVote.Vote, true) end end
 function api:Skip(t, w) if waitTime(t, w) then RS.ByteNetReliable:FireServer(buffer.fromstring("\148\001")) end end
-function api:AutoSkip(v, t, w) if waitTime(t, w) then bytenet.SkipWave.ToggleAutoSkip.send(v) end end
+function api:AutoSkip(v, t, w) if waitTime(t, w) then safeSend(bytenet.SkipWave.ToggleAutoSkip, v) end end
 
 function api:Place(id, pos, t, w)
     if waitTime(t, w) then
         env.totalplaced += 1
-        pcall(towers.PlaceTower.invoke, towers.PlaceTower, {TowerID = id, Position = pos, Rotation = 0})
+        safeInvoke(towers.PlaceTower, {TowerID = id, Position = pos, Rotation = 0})
     end
 end
 
 function api:Upgrade(i, t, w)
     if waitTime(t, w) then
-        local uid = env.firsttower + (i - 1)
-        pcall(towers.UpgradeTower.invoke, towers.UpgradeTower, uid)
+        safeInvoke(towers.UpgradeTower, env.firsttower + (i - 1))
     end
 end
 
 function api:SetTarget(i, mode, t, w)
     if waitTime(t, w) then
-        local uid = env.firsttower + (i - 1)
-        pcall(towers.SetTargetMode.send, towers.SetTargetMode, {UID = uid, TargetMode = mode})
+        safeSend(towers.SetTargetMode, {UID = env.firsttower + (i - 1), TargetMode = mode})
     end
 end
 
 function api:Sell(i, t, w)
     if waitTime(t, w) then
-        local uid = env.firsttower + (i - 1)
-        pcall(towers.SellTower.invoke, towers.SellTower, uid)
+        safeInvoke(towers.SellTower, env.firsttower + (i - 1))
     end
 end
 
 function api:PlayAgain()
-    while not env.isroundover do task.wait(0.1) end
+    while not env.isroundover do task.wait(0.2) end
     env.firsttower = env.totalplaced + 1
     env.totalplaced = 0
     env.timer = 0
     env.wave = 1
-    task.wait(1)
-    pcall(bytenet.RoundResult.VoteForRestart.send, bytenet.RoundResult.VoteForRestart, true)
+    task.wait(1.5)
+    safeSend(bytenet.RoundResult.VoteForRestart, true)
 end
 
+-- FIXED Loop: No spam - only call when near time/wave
 function api:Loop(callback)
+    print("[API] Loop starting - waiting for game ready")
+    -- Wait until in-game and ByteNet seems alive
+    while game.PlaceId == LOBBY_PLACE_ID or not towers or not towers.PlaceTower do
+        task.wait(1)
+    end
+    print("[API] Game ready - loop active")
+
     task.spawn(function()
         while true do
-            callback()
-            task.wait(0.03)
+            local ok, err = pcall(callback)
+            if not ok then
+                warn("[API Loop Error] " .. tostring(err))
+            end
+            task.wait(0.1)  -- Less aggressive polling to avoid flooding ByteNet
         end
     end)
-    print("[API] Loop started")
 end
 
--- Bonus: Difficulty vote (from ov och API, if supported)
+-- Difficulty vote (if exists)
 function api:Difficulty(diff)
-    pcall(bytenet.DifficultyVote.Vote.send, bytenet.DifficultyVote.Vote, diff)
-    print("[API] Voted difficulty: " .. diff)
+    pcall(function()
+        bytenet.DifficultyVote.Vote.send(diff)
+    end)
+    print("[API] Difficulty vote: " .. diff)
 end
 
 return api
