@@ -249,7 +249,7 @@ rectab:Button({
 		end
 
 		writefile(env.StratName .. ".txt",
-			"local api = loadstring(game:HttpGet('https://raw.githubusercontent.com/ovoch228/shitty-x/refs/heads/main/rtd/api'))()\n\n" ..
+			"local api = loadstring(game:HttpGet('https://raw.githubusercontent.com/loudman4205-cloud/Retro-tower-defense/refs/heads/main/Apif'))()\n\n" ..
 			"api:Loadout({" .. table.concat(t, ", ") .. "})\n" ..
 			"api:Map('" .. env.map .. "', {" .. table.concat(m, ", ") .. "})\n\n" ..
 			"api:Start()\n\napi:Loop(function()\n"
