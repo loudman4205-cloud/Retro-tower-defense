@@ -1,30 +1,30 @@
--- Shitty X API - Precise Timing Version
--- Self-contained: precise timer (0.1s updates), wait polling (0.03s)
--- Compatible with all recorded macros from the UI script
--- Usage in macro .txt files:
--- local api = loadstring(game:HttpGet('.../rtd/api'))()
--- api:Loadout({...})  -- optional, equips towers
--- api:Map('MapName', {...})  -- optional, logs map/mods
--- api:Start()  -- sets timescale 2x
--- api:Loop(function() ... end)  -- starts precise execution loop
+-- Shitty X API - FIXED: Lobby/Game Safe + Precise Timing
+-- Fixes: nil 'EquipTower' (use bytenet.Inventory), lobby detection, service waits
+-- Compatible with macros (Loadout/Map only in lobby PlaceId 98936097545088)
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local LP = Players.LocalPlayer
 
-local teamwork = RS:WaitForChild("Teawork")
-local client = teamwork:WaitForChild("Client")
-local shared = teamwork:WaitForChild("Shared")
+-- Lobby PlaceId (from research: Retro TD)
+local LOBBY_PLACE_ID = 98936097545088
+
+-- Safe service loading
+local success, teamwork = pcall(RS.WaitForChild, RS, "Teawork", 10)
+if not success then error("Teawork not found - wrong game?") end
+
+local client = teamwork:WaitForChild("Client", 5)
+local shared = teamwork:WaitForChild("Shared", 5)
 
 local bytenet = require(shared.Services.ByteNetworking)
 local modifiersmodule = require(client.Services.Game.ModifierController)
 local datamodule = require(client.Services.DataSync)
 
-local towers = bytenet.Towers
-local mapinfo = RS:WaitForChild("RoundInfo")
-local roundresultui = LP.PlayerGui:WaitForChild("GameUI"):WaitForChild("RoundResult")
+local towers = bytenet.Towers  -- In-game only
+local mapinfo = RS:WaitForChild("RoundInfo", 10)
+local roundresultui = LP.PlayerGui:WaitForChild("GameUI"):WaitForChild("RoundResult", 10)
 
--- Setup global env (exact match to main UI script for macro compatibility)
+-- Global env (matches UI script)
 local env = getgenv()
 env.timer = 0
 env.wave = mapinfo:GetAttribute("Wave") or 1
@@ -34,122 +34,125 @@ env.totalplaced = 0
 env.firsttower = 1
 env.isroundover = false
 
--- Precise Timer (0.1s updates)
+-- Precise Timer
 task.spawn(function()
-	local last = os.time()
-	while true do
-		env.timer = (os.time() - last) * 2
-		task.wait(0.1)
-	end
+    local last = os.time()
+    while true do
+        env.timer = (os.time() - last) * 2
+        task.wait(0.1)
+    end
 end)
 
--- Auto-track wave/round
+-- Trackers
 mapinfo:GetAttributeChangedSignal("Wave"):Connect(function()
-	env.wave = mapinfo:GetAttribute("Wave")
+    env.wave = mapinfo:GetAttribute("Wave")
 end)
 
 roundresultui:GetPropertyChangedSignal("Visible"):Connect(function()
-	env.isroundover = roundresultui.Visible
+    env.isroundover = roundresultui.Visible
 end)
 
--- API object
+-- API
 local api = {}
 
--- Precise waitTime (0.03s polling for sub-second accuracy)
 local function waitTime(t, w)
-	while env.wave < w and not env.isroundover do
-		task.wait(0.03)
-	end
-	while env.timer < t and not env.isroundover do
-		task.wait(0.03)
-	end
-	return not env.isroundover
+    while env.wave < w and not env.isroundover do task.wait(0.03) end
+    while env.timer < t and not env.isroundover do task.wait(0.03) end
+    return not env.isroundover
 end
 
+-- FIXED Loadout: Lobby-only + correct remote (bytenet.Inventory, not towers.Inventory)
 function api:Loadout(towersList)
-	-- Equip towers (lobby only)
-	for slot, towerID in ipairs(towersList or {}) do
-		towers.Inventory.EquipTower.invoke({TowerID = towerID, Slot = slot})
-		task.wait(0.4)
-	end
-	print("[API] Loadout applied: " .. #towersList .. " towers")
+    if game.PlaceId ~= LOBBY_PLACE_ID then
+        print("[API] Loadout skipped: In-game (PlaceId " .. game.PlaceId .. ")")
+        return
+    end
+    
+    towersList = towersList or {}
+    local equipped = 0
+    for slot, towerID in ipairs(towersList) do
+        local ok = pcall(bytenet.Inventory.EquipTower.invoke, bytenet.Inventory.EquipTower, {TowerID = towerID, Slot = slot})
+        if ok then equipped += 1 end
+        task.wait(0.45)
+    end
+    print("[API] Loadout: " .. equipped .. "/" .. #towersList .. " towers equipped")
 end
 
 function api:Map(mapName, modsList)
-	-- Log/validate map & modifiers (no action needed)
-	print("[API] Map: " .. mapName .. " | Mods: " .. #modsList)
+    if game.PlaceId ~= LOBBY_PLACE_ID then
+        print("[API] Map skipped: Not in lobby")
+        return
+    end
+    -- Create match (from ov och API)
+    pcall(bytenet.MatchmakingNew.CreateSingleplayer.invoke, bytenet.MatchmakingNew.CreateSingleplayer, {
+        Gamemode = "Standard",
+        MapID = mapName,
+        Modifiers = modsList or {}
+    })
+    print("[API] Created match: " .. mapName)
 end
 
 function api:Start()
-	bytenet.Timescale.SetTimescale.send(2)
-	print("[API] Started (2x speed)")
+    pcall(bytenet.Timescale.SetTimescale.send, bytenet.Timescale.SetTimescale, 2)
+    print("[API] Started (2x speed)")
 end
 
-function api:Ready(t, w)
-	if waitTime(t, w) then
-		bytenet.ReadyVote.Vote.send(true)
-	end
-end
-
-function api:Skip(t, w)
-	if waitTime(t, w) then
-		RS.ByteNetReliable:FireServer(buffer.fromstring("\148\001"))
-	end
-end
-
-function api:AutoSkip(v, t, w)
-	if waitTime(t, w) then
-		bytenet.SkipWave.ToggleAutoSkip.send(v)
-	end
-end
+function api:Ready(t, w) if waitTime(t, w) then bytenet.ReadyVote.Vote.send(true) end end
+function api:Skip(t, w) if waitTime(t, w) then RS.ByteNetReliable:FireServer(buffer.fromstring("\148\001")) end end
+function api:AutoSkip(v, t, w) if waitTime(t, w) then bytenet.SkipWave.ToggleAutoSkip.send(v) end end
 
 function api:Place(id, pos, t, w)
-	if waitTime(t, w) then
-		env.totalplaced = env.totalplaced + 1
-		towers.PlaceTower.invoke({ TowerID = id, Position = pos, Rotation = 0 })
-	end
+    if waitTime(t, w) then
+        env.totalplaced += 1
+        pcall(towers.PlaceTower.invoke, towers.PlaceTower, {TowerID = id, Position = pos, Rotation = 0})
+    end
 end
 
 function api:Upgrade(i, t, w)
-	if waitTime(t, w) then
-		towers.UpgradeTower.invoke(env.firsttower + (i - 1))
-	end
+    if waitTime(t, w) then
+        local uid = env.firsttower + (i - 1)
+        pcall(towers.UpgradeTower.invoke, towers.UpgradeTower, uid)
+    end
 end
 
 function api:SetTarget(i, mode, t, w)
-	if waitTime(t, w) then
-		towers.SetTargetMode.send({
-			UID = env.firsttower + (i - 1),
-			TargetMode = mode
-		})
-	end
+    if waitTime(t, w) then
+        local uid = env.firsttower + (i - 1)
+        pcall(towers.SetTargetMode.send, towers.SetTargetMode, {UID = uid, TargetMode = mode})
+    end
 end
 
 function api:Sell(i, t, w)
-	if waitTime(t, w) then
-		towers.SellTower.invoke(env.firsttower + (i - 1))
-	end
+    if waitTime(t, w) then
+        local uid = env.firsttower + (i - 1)
+        pcall(towers.SellTower.invoke, towers.SellTower, uid)
+    end
 end
 
 function api:PlayAgain()
-	while not env.isroundover do task.wait(0.1) end
-	env.firsttower = env.totalplaced + 1
-	env.totalplaced = 0
-	env.timer = 0
-	env.wave = 1
-	task.wait(1)
-	bytenet.RoundResult.VoteForRestart.send(true)
+    while not env.isroundover do task.wait(0.1) end
+    env.firsttower = env.totalplaced + 1
+    env.totalplaced = 0
+    env.timer = 0
+    env.wave = 1
+    task.wait(1)
+    pcall(bytenet.RoundResult.VoteForRestart.send, bytenet.RoundResult.VoteForRestart, true)
 end
 
 function api:Loop(callback)
-	-- Infinite loop for macro actions (runs continuously)
-	task.spawn(function()
-		while true do
-			callback()
-			task.wait(0.03)  -- Precise loop timing
-		end
-	end)
-	print("[API] Loop started")
+    task.spawn(function()
+        while true do
+            callback()
+            task.wait(0.03)
+        end
+    end)
+    print("[API] Loop started")
+end
+
+-- Bonus: Difficulty vote (from ov och API, if supported)
+function api:Difficulty(diff)
+    pcall(bytenet.DifficultyVote.Vote.send, bytenet.DifficultyVote.Vote, diff)
+    print("[API] Voted difficulty: " .. diff)
 end
 
 return api
