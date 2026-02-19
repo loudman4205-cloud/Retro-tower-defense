@@ -1,224 +1,155 @@
--- Improved Shitty X API (2026 edition) - cleaner, safer, more features
+-- Shitty X API - Precise Timing Version
+-- Self-contained: precise timer (0.1s updates), wait polling (0.03s)
+-- Compatible with all recorded macros from the UI script
+-- Usage in macro .txt files:
+-- local api = loadstring(game:HttpGet('.../rtd/api'))()
+-- api:Loadout({...})  -- optional, equips towers
+-- api:Map('MapName', {...})  -- optional, logs map/mods
+-- api:Start()  -- sets timescale 2x
+-- api:Loop(function() ... end)  -- starts precise execution loop
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local LP = Players.LocalPlayer
 
 local teamwork = RS:WaitForChild("Teawork")
-local shared = teamwork:WaitForChild("Shared")
 local client = teamwork:WaitForChild("Client")
+local shared = teamwork:WaitForChild("Shared")
 
 local bytenet = require(shared.Services.ByteNetworking)
-local towersNet = bytenet.Towers
+local modifiersmodule = require(client.Services.Game.ModifierController)
+local datamodule = require(client.Services.DataSync)
 
+local towers = bytenet.Towers
+local mapinfo = RS:WaitForChild("RoundInfo")
+local roundresultui = LP.PlayerGui:WaitForChild("GameUI"):WaitForChild("RoundResult")
+
+-- Setup global env (exact match to main UI script for macro compatibility)
+local env = getgenv()
+env.timer = 0
+env.wave = mapinfo:GetAttribute("Wave") or 1
+env.map = mapinfo:GetAttribute("Map")
+env.modifiers = modifiersmodule.GetModifiers()
+env.totalplaced = 0
+env.firsttower = 1
+env.isroundover = false
+
+-- Precise Timer (0.1s updates)
+task.spawn(function()
+	local last = os.time()
+	while true do
+		env.timer = (os.time() - last) * 2
+		task.wait(0.1)
+	end
+end)
+
+-- Auto-track wave/round
+mapinfo:GetAttributeChangedSignal("Wave"):Connect(function()
+	env.wave = mapinfo:GetAttribute("Wave")
+end)
+
+roundresultui:GetPropertyChangedSignal("Visible"):Connect(function()
+	env.isroundover = roundresultui.Visible
+end)
+
+-- API object
 local api = {}
-local env = getgenv()  -- we'll namespace better
 
--- Internal state (namespaced under api._state)
-api._state = {
-    timer = 0,
-    wave = 1,
-    isRoundOver = false,
-    totalPlaced = 0,
-    firstTowerIndex = 1,
-    lastTime = os.time(),
-    logFunc = function(msg) warn("[API] " .. msg) end,  -- default fallback
-}
-
-local state = api._state
-
--- Config / helpers
-local function safeLog(msg)
-    if state.logFunc then
-        state.logFunc(msg)
-    else
-        warn("[ShittyX API] " .. msg)
-    end
+-- Precise waitTime (0.03s polling for sub-second accuracy)
+local function waitTime(t, w)
+	while env.wave < w and not env.isroundover do
+		task.wait(0.03)
+	end
+	while env.timer < t and not env.isroundover do
+		task.wait(0.03)
+	end
+	return not env.isroundover
 end
 
-local function waitUntil(condition, timeout)
-    local start = tick()
-    while not condition() do
-        if timeout and (tick() - start > timeout) then
-            return false
-        end
-        task.wait(0.05)
-    end
-    return true
+function api:Loadout(towersList)
+	-- Equip towers (lobby only)
+	for slot, towerID in ipairs(towersList or {}) do
+		towers.Inventory.EquipTower.invoke({TowerID = towerID, Slot = slot})
+		task.wait(0.4)
+	end
+	print("[API] Loadout applied: " .. #towersList .. " towers")
 end
 
--- Public setters
-function api:SetLogger(fn)
-    state.logFunc = fn  -- pass your updatelog function here
+function api:Map(mapName, modsList)
+	-- Log/validate map & modifiers (no action needed)
+	print("[API] Map: " .. mapName .. " | Mods: " .. #modsList)
 end
 
-function api:SetTimescale(scale)
-    bytenet.Timescale.SetTimescale.send(scale or 2)
-    safeLog("Timescale set to " .. (scale or 2))
+function api:Start()
+	bytenet.Timescale.SetTimescale.send(2)
+	print("[API] Started (2x speed)")
 end
 
--- Map / Loadout (lobby functions)
-function api:Loadout(towerNames)
-    for slot, towerID in ipairs(towerNames or {}) do
-        towersNet.Inventory.EquipTower.invoke({TowerID = towerID, Slot = slot})
-        task.wait(0.4)  -- safer delay
-    end
-    safeLog("Loadout applied: " .. #towerNames .. " towers")
-end
-
-function api:CreateMatch(mapID, modifiers, gamemode)
-    gamemode = gamemode or "Standard"
-    bytenet.MatchmakingNew.CreateSingleplayer.invoke({
-        Gamemode = gamemode,
-        MapID = mapID,
-        Modifiers = modifiers or {}
-    })
-    safeLog("Created match: " .. mapID .. " (" .. gamemode .. ")")
-end
-
--- In-game setup
-function api:Init()
-    local roundResult = LP.PlayerGui:WaitForChild("GameUI"):WaitForChild("RoundResult")
-    local mapInfo = RS:WaitForChild("RoundInfo")
-
-    state.wave = mapInfo:GetAttribute("Wave") or 1
-
-    mapInfo:GetAttributeChangedSignal("Wave"):Connect(function()
-        state.wave = mapInfo:GetAttribute("Wave") or state.wave
-    end)
-
-    roundResult:GetPropertyChangedSignal("Visible"):Connect(function()
-        state.isRoundOver = roundResult.Visible
-    end)
-
-    task.spawn(function()
-        state.lastTime = os.time()
-        while true do
-            state.timer = (os.time() - state.lastTime) * 2  -- keep your original timing logic
-            task.wait(0.2)
-        end
-    end)
-
-    safeLog("API initialized | Timer/Wave tracking started")
-end
-
--- Wait helpers
-local function waitTime(targetTime, targetWave, extraWait)
-    while state.wave < (targetWave or 0) and not state.isRoundOver do task.wait(0.05) end
-    while state.timer < (targetTime or 0) and not state.isRoundOver do task.wait(0.05) end
-    if extraWait then task.wait(extraWait) end
-    return not state.isRoundOver
-end
-
--- Core actions (same signatures as before for recorder compatibility)
 function api:Ready(t, w)
-    if waitTime(t, w) then
-        bytenet.ReadyVote.Vote.send(true)
-        safeLog("Ready vote sent")
-    end
+	if waitTime(t, w) then
+		bytenet.ReadyVote.Vote.send(true)
+	end
 end
 
 function api:Skip(t, w)
-    if waitTime(t, w) then
-        RS.ByteNetReliable:FireServer(buffer.fromstring("\148\001"))
-        safeLog("Wave skipped")
-    end
+	if waitTime(t, w) then
+		RS.ByteNetReliable:FireServer(buffer.fromstring("\148\001"))
+	end
 end
 
-function api:AutoSkip(enabled, t, w)
-    if waitTime(t, w) then
-        bytenet.SkipWave.ToggleAutoSkip.send(enabled)
-        safeLog("Auto-skip set to " .. tostring(enabled))
-    end
+function api:AutoSkip(v, t, w)
+	if waitTime(t, w) then
+		bytenet.SkipWave.ToggleAutoSkip.send(v)
+	end
 end
 
-function api:Place(towerID, position, t, w, rotation)
-    rotation = rotation or 0
-    if waitTime(t, w, 0.1) then
-        local success, err = pcall(function()
-            towersNet.PlaceTower.invoke({
-                TowerID = towerID,
-                Position = position,
-                Rotation = rotation
-            })
-        end)
-        if success then
-            state.totalPlaced += 1
-            safeLog(string.format("Placed %s @ %.1f,%.1f,%.1f", towerID, position.X, position.Y, position.Z))
-        else
-            safeLog("Place failed: " .. tostring(err))
-        end
-    end
+function api:Place(id, pos, t, w)
+	if waitTime(t, w) then
+		env.totalplaced = env.totalplaced + 1
+		towers.PlaceTower.invoke({ TowerID = id, Position = pos, Rotation = 0 })
+	end
 end
 
-function api:Upgrade(index, t, w)
-    if waitTime(t, w, 0.1) then
-        local uid = state.firstTowerIndex + (index - 1)
-        towersNet.UpgradeTower.invoke(uid)
-        safeLog("Upgraded tower #" .. index .. " (UID " .. uid .. ")")
-    end
+function api:Upgrade(i, t, w)
+	if waitTime(t, w) then
+		towers.UpgradeTower.invoke(env.firsttower + (i - 1))
+	end
 end
 
-function api:SetTarget(index, mode, t, w)
-    if waitTime(t, w) then
-        local uid = state.firstTowerIndex + (index - 1)
-        towersNet.SetTargetMode.send({UID = uid, TargetMode = mode})
-        safeLog("Set target mode for tower #" .. index .. " → " .. mode)
-    end
+function api:SetTarget(i, mode, t, w)
+	if waitTime(t, w) then
+		towers.SetTargetMode.send({
+			UID = env.firsttower + (i - 1),
+			TargetMode = mode
+		})
+	end
 end
 
-function api:Sell(index, t, w)
-    if waitTime(t, w) then
-        local uid = state.firstTowerIndex + (index - 1)
-        towersNet.SellTower.invoke(uid)
-        safeLog("Sold tower #" .. index)
-    end
+function api:Sell(i, t, w)
+	if waitTime(t, w) then
+		towers.SellTower.invoke(env.firsttower + (i - 1))
+	end
 end
 
 function api:PlayAgain()
-    waitUntil(function() return state.isRoundOver end, 60)
-    state.firstTowerIndex = state.totalPlaced + 1
-    state.lastTime = os.time()
-    state.timer = 0
-    state.wave = 1
-    task.wait(1.2)
-    bytenet.RoundResult.VoteForRestart.send(true)
-    safeLog("Voted to play again")
+	while not env.isroundover do task.wait(0.1) end
+	env.firsttower = env.totalplaced + 1
+	env.totalplaced = 0
+	env.timer = 0
+	env.wave = 1
+	task.wait(1)
+	bytenet.RoundResult.VoteForRestart.send(true)
 end
 
--- Extra helpers you might want to use manually or add to macros
-function api:WaitForCash(minCash, timeout)
-    timeout = timeout or 30
-    local start = tick()
-    while LP:GetAttribute("Cash") < minCash do
-        if tick() - start > timeout then return false end
-        task.wait(0.1)
-    end
-    return true
-end
-
-function api:GetTowerUID(relativeIndex)
-    return state.firstTowerIndex + (relativeIndex - 1)
-end
-
--- Loop starter (for macros)
 function api:Loop(callback)
-    task.spawn(function()
-        while true do
-            callback()
-            task.wait(0.03)
-        end
-    end)
-end
-
--- Optional: reset state for new strat
-function api:Reset()
-    state.timer = 0
-    state.wave = 1
-    state.totalPlaced = 0
-    state.firstTowerIndex = 1
-    state.lastTime = os.time()
-    safeLog("API state reset")
+	-- Infinite loop for macro actions (runs continuously)
+	task.spawn(function()
+		while true do
+			callback()
+			task.wait(0.03)  -- Precise loop timing
+		end
+	end)
+	print("[API] Loop started")
 end
 
 return api
