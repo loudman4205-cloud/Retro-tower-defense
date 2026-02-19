@@ -133,17 +133,29 @@ window:ShowTab(logtab)
 updatelog("Voting")
 
 -- Wait helper - blocks until wave and time are reached
--- What it DOESN'T do: Doesn't account for game pauses, doesn't handle round end mid-wait gracefully
 function waitTime(time, wave)
-	while waveinfo < wave and not isroundover do
-		taskwait(0.05)
-	end
-	   
-    	while timer < time and not isroundover do
-        	taskwait(0.05)
-    	end
-    	
-    	return not isroundover
+    local startTick = tick()
+    local MAX_WAIT = 60
+
+    -- Wait for wave
+    while env.waveinfo < wave and not env.isroundover do
+        if tick() - startTick > MAX_WAIT then return false end
+        task.wait(0.03)
+    end
+
+    -- If round already over → bail immediately
+    if env.isroundover then return false end
+
+    -- Wait for time (check round end every step)
+    while env.timer < time do
+        if env.isroundover or tick() - startTick > MAX_WAIT then
+            return false
+        end
+        task.wait(0.03)
+    end
+
+    -- Final safety check right before returning
+    return not env.isroundover
 end
 
 -- :Loop - runs the macro callback forever every ~0.03s
