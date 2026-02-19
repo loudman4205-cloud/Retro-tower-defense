@@ -1,172 +1,225 @@
--- Shitty X API - Crash-Fixed: No nil cursor spam, UI-safe, lobby/game aware
+local replicatedstorage = game:GetService("ReplicatedStorage")
 
-local RS = game:GetService("ReplicatedStorage")
-local Players = game:GetService("Players")
-local LP = Players.LocalPlayer
+local library = loadstring(game:HttpGet('https://raw.githubusercontent.com/ovoch228/depthsoimgui/refs/heads/main/library'))()
 
-local LOBBY_PLACE_ID = 98936097545088  -- Confirmed from game page
-
-local teamwork = RS:WaitForChild("Teawork", 15)
-if not teamwork then error("Teawork missing - wrong game?") end
-
-local client = teamwork:WaitForChild("Client", 10)
-local shared = teamwork:WaitForChild("Shared", 10)
-
-local bytenet = require(shared.Services.ByteNetworking)
-local modifiersmodule = require(client.Services.Game.ModifierController)
-local datamodule = require(client.Services.DataSync)
-
-local towers = bytenet.Towers
-local mapinfo = RS:WaitForChild("RoundInfo", 10)
-local roundresultui = LP.PlayerGui:WaitForChild("GameUI"):WaitForChild("RoundResult", 10)
-
-local env = getgenv()
-env.timer = 0
-env.wave = mapinfo:GetAttribute("Wave") or 1
-env.map = mapinfo:GetAttribute("Map")
-env.modifiers = modifiersmodule.GetModifiers()
-env.totalplaced = 0
-env.firsttower = 1
-env.isroundover = false
-
--- Timer
-task.spawn(function()
-    local last = os.time()
-    while true do
-        env.timer = (os.time() - last) * 2
-        task.wait(0.1)
-    end
-end)
-
-mapinfo:GetAttributeChangedSignal("Wave"):Connect(function()
-    env.wave = mapinfo:GetAttribute("Wave")
-end)
-
-roundresultui:GetPropertyChangedSignal("Visible"):Connect(function()
-    env.isroundover = roundresultui.Visible
-end)
+local bytenet = require(replicatedstorage:WaitForChild("Teawork"):WaitForChild("Shared"):WaitForChild("Services"):WaitForChild("ByteNetworking"))
 
 local api = {}
 
-local function waitTime(t, w)
-    local start = tick()
-    while (env.wave < w or env.timer < t) and not env.isroundover and tick() - start < 60 do
-        task.wait(0.03)
-    end
-    return not env.isroundover
+function api:Loadout(towers: table)
+	if game.PlaceId ~= 98936097545088 then return end
+
+	for i = 1, #towers do
+		bytenet.Inventory.EquipTower.invoke({["TowerID"] = towers[i], ["Slot"] = i})
+		task.wait(0.5)
+	end
 end
 
-function api:Loadout(towersList)
-    if game.PlaceId ~= LOBBY_PLACE_ID then
-        print("[API] Loadout skipped: In-game")
-        return
-    end
-    towersList = towersList or {}
-    local count = 0
-    for slot, id in ipairs(towersList) do
-        pcall(function()
-            bytenet.Inventory.EquipTower.invoke({TowerID = id, Slot = slot})
-        end)
-        task.wait(0.5)
-        count += 1
-    end
-    print("[API] Loadout: " .. count .. " towers")
+function api:Map(map: string, modifiers: table)
+	if game.PlaceId ~= 98936097545088 then return end
+	
+	bytenet.MatchmakingNew.CreateSingleplayer.invoke({["Gamemode"] = "Standard", ["MapID"] = map, ["Modifiers"] = modifiers})
 end
 
-function api:Map(mapName, mods)
-    if game.PlaceId ~= LOBBY_PLACE_ID then
-        print("[API] Map skipped: Not lobby")
-        return
-    end
-    pcall(function()
-        bytenet.MatchmakingNew.CreateSingleplayer.invoke({
-            Gamemode = "Standard",
-            MapID = mapName,
-            Modifiers = mods or {}
-        })
-    end)
-    print("[API] Map created: " .. mapName)
+if game.PlaceId ~= 124069847780670 then return api end
+
+local towers = bytenet.Towers
+local mapinfo = replicatedstorage.RoundInfo
+
+local roundresultui = game:GetService("Players").LocalPlayer.PlayerGui.GameUI.RoundResult
+
+local ostime = os.time
+local taskwait = task.wait
+local env = getgenv()
+
+env.StratName = "Strat"
+
+env.timer = 0 -- seconds
+env.lasttime = ostime()
+env.waveinfo = 1
+env.isroundover = false
+
+env.totalplacedtowers = 0
+env.firsttower = 1
+
+env.destroyui = false
+
+local window = library:CreateWindow({
+    Title = "Shitty X",
+    Size = UDim2.new(0, 350, 0, 370),
+    Position = UDim2.new(0.5, 0, 0, 70),
+    NoResize = false
+})
+
+window:Center()
+
+local logtab = window:CreateTab({
+    Name = "Macro Player",
+    Visible = true
+})
+
+local filename = logtab:Label({
+    Text = "StratName: " .. env.StratName
+})
+
+local logstab = window:CreateTab({
+    Name = "Logs",
+    Visible = true
+})
+
+local loglabel = logtab:Label({
+    Label = "Last Log: Voting"
+})
+
+local row = logstab:Row()
+
+logstab:Separator({
+	Text = "Logs:"
+})
+
+local logs = logstab:Console({
+	Text = "",
+	ReadOnly = true,
+	LineNumbers = false,
+	Border = false,
+	Fill = true,
+	Enabled = true,
+	AutoScroll = true,
+	RichText = true,
+	MaxLines = 200
+})
+
+function updatelog(text: string)
+	setthreadidentity(7)
+	logs:AppendText(DateTime.now():FormatLocalTime("HH:mm:ss", "en-us") .. ":", text)
+	loglabel:SetText("Last Log: " .. text)
+end
+
+window:ShowTab(logtab)
+updatelog("Voting")
+
+function waitTime(time, wave)
+	while waveinfo < wave and not isroundover do
+		taskwait(0.05)
+	end
+	   
+    	while timer < time and not isroundover do
+        	taskwait(0.05)
+    	end
+    	
+    	return not isroundover
+end
+
+function api:Loop(func)
+	if game.PlaceId ~= 124069847780670 then return end 
+	
+	while taskwait(0.03) do				
+		func()
+	end
 end
 
 function api:Start()
-    pcall(bytenet.Timescale.SetTimescale.send, 2)
-    print("[API] Started")
+	bytenet.Timescale.SetTimescale.send(2)
+
+	env.waveinfo = mapinfo:GetAttribute("Wave") or 1
+	env.timer = 0
+	
+	mapinfo:GetAttributeChangedSignal("Wave"):Connect(function()
+		env.waveinfo = mapinfo:GetAttribute("Wave")
+	end)
+
+	roundresultui:GetPropertyChangedSignal("Visible"):Connect(function()
+		isroundover = roundresultui.Visible
+	end)
+	
+	updatelog("Game Started")
+		
+	task.spawn(function()
+		lasttime = ostime()
+		while env.lasttime do
+			env.timer = (ostime() - env.lasttime) * 2
+			--print(string.format("Timer: %.1f | Wave: %d", timer, waveinfo))
+			
+			taskwait(0.25)
+		end
+	end)
 end
 
--- Safe action wrappers (prevent spam/crash)
-local function safeInvoke(remote, ...)
-    pcall(function() remote.invoke(...) end)
+function api:Difficulty(diff: string)
+	updatelog(`Voted difficulty {diff}`)
+	bytenet.DifficultyVote.Vote.send(diff)
+	
+	while #mapinfo:GetAttribute("Difficulty") == 0 do taskwait(0.05) end 
+	
+	env.lasttime = ostime()
+	env.timer = 0
+	env.waveinfo = 1
+	
+	taskwait(0.1)
 end
 
-local function safeSend(remote, ...)
-    pcall(function() remote.send(...) end)
+function api:Ready(time: number, wave: number)
+	if waitTime(time, wave) then updatelog("Sent ready vote") bytenet.ReadyVote.Vote.send(true) end
 end
 
-function api:Ready(t, w) if waitTime(t, w) then safeSend(bytenet.ReadyVote.Vote, true) end end
-function api:Skip(t, w) if waitTime(t, w) then RS.ByteNetReliable:FireServer(buffer.fromstring("\148\001")) end end
-function api:AutoSkip(v, t, w) if waitTime(t, w) then safeSend(bytenet.SkipWave.ToggleAutoSkip, v) end end
-
-function api:Place(id, pos, t, w)
-    if waitTime(t, w) then
-        env.totalplaced += 1
-        safeInvoke(towers.PlaceTower, {TowerID = id, Position = pos, Rotation = 0})
-    end
+function api:Skip(time: number, wave: number)
+	if waitTime(time, wave) then updatelog(`Skipping Wave {wave}`) replicatedstorage:WaitForChild("ByteNetReliable"):FireServer(buffer.fromstring("\148\001")) end
 end
 
-function api:Upgrade(i, t, w)
-    if waitTime(t, w) then
-        safeInvoke(towers.UpgradeTower, env.firsttower + (i - 1))
-    end
+function api:AutoSkip(enable: number, time: number, wave: number)
+	if waitTime(time, wave) then updatelog(`AutoSkip set to {tostring(enable)}`) bytenet.SkipWave.ToggleAutoSkip.send(enable) end
 end
 
-function api:SetTarget(i, mode, t, w)
-    if waitTime(t, w) then
-        safeSend(towers.SetTargetMode, {UID = env.firsttower + (i - 1), TargetMode = mode})
-    end
+function api:Place(tower: string, position: Vector3, time: number, wave: number)
+	if waitTime(time, wave) then	
+		env.totalplacedtowers = env.totalplacedtowers + 1
+		
+		updatelog(`Placed Tower {tower}`)
+		towers.PlaceTower.invoke({["Position"] = position, ["Rotation"] = 0, ["TowerID"] = tower})
+	end
 end
 
-function api:Sell(i, t, w)
-    if waitTime(t, w) then
-        safeInvoke(towers.SellTower, env.firsttower + (i - 1))
-    end
+function api:Upgrade(tower: number, time: number, wave: number)
+	if waitTime(time, wave) then
+		updatelog(`Upgraded Tower {tower}`)
+		
+		local realindex = firsttower + (tower - 1)
+		towers.UpgradeTower.invoke(realindex)
+	end
+end
+
+function api:SetTarget(tower: number, target: string, time: number, wave: number)
+	if waitTime(time, wave) then
+		updatelog(`Changed Tower {tower} Target to {target} `)
+	
+		local realindex = firsttower + (tower - 1)
+		towers.SetTargetMode.send({["UID"] = (realindex), ["TargetMode"] = target})
+	end
+end
+
+function api:Sell(tower: number, time: number, wave: number)
+	if waitTime(time, wave) then
+		updatelog(`Sold Tower {tower}`) 
+		
+		local realindex = firsttower + (tower - 1)
+		towers.SellTower.invoke(realindex)
+	end
 end
 
 function api:PlayAgain()
-    while not env.isroundover do task.wait(0.2) end
-    env.firsttower = env.totalplaced + 1
-    env.totalplaced = 0
-    env.timer = 0
-    env.wave = 1
-    task.wait(1.5)
-    safeSend(bytenet.RoundResult.VoteForRestart, true)
-end
-
--- FIXED Loop: No spam - only call when near time/wave
-function api:Loop(callback)
-    print("[API] Loop starting - waiting for game ready")
-    -- Wait until in-game and ByteNet seems alive
-    while game.PlaceId == LOBBY_PLACE_ID or not towers or not towers.PlaceTower do
-        task.wait(1)
-    end
-    print("[API] Game ready - loop active")
-
-    task.spawn(function()
-        while true do
-            local ok, err = pcall(callback)
-            if not ok then
-                warn("[API Loop Error] " .. tostring(err))
-            end
-            task.wait(0.1)  -- Less aggressive polling to avoid flooding ByteNet
-        end
-    end)
-end
-
--- Difficulty vote (if exists)
-function api:Difficulty(diff)
-    pcall(function()
-        bytenet.DifficultyVote.Vote.send(diff)
-    end)
-    print("[API] Difficulty vote: " .. diff)
+	while not isroundover do taskwait(0.1) end
+	
+	env.firsttower = env.totalplacedtowers + 1
+	
+	env.lasttime = ostime()
+	env.timer = 0
+	env.waveinfo = 1
+	
+	taskwait(1)
+	
+	bytenet.RoundResult.VoteForRestart.send(true)
+	updatelog("Voted for restart")
+	--print('vote restart success:')
 end
 
 return api
