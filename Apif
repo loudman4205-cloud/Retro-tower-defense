@@ -199,25 +199,81 @@ function api:Start()
 	end)
 end
 
--- :Difficulty - votes difficulty and resets timer/wave to 0/1 after vote
--- Waits until difficulty attribute updates
--- What it DOESN'T do: Doesn't verify if vote succeeded, assumes difficulty string is valid
+-- :Difficulty - votes difficulty, waits for confirmation, resets timer/wave
+-- Improvements:
+--   - Uses pcall to prevent crashes if vote remote fails
+--   - Adds timeout to the wait loop (prevents hanging forever if attribute never updates)
+--   - Logs success/failure + actual difficulty value after confirmation
+--   - Resets timer only after confirmation (safer)
+-- What it still DOESN'T do:
+--   - Can't force a vote if server ignores it
+--   - Assumes "Difficulty" attribute is the correct one to check
+
 function api:Difficulty(diff: string)
-	updatelog(`Voted difficulty {diff}`)
-	bytenet.DifficultyVote.Vote.send(diff)
-	
-	while #mapinfo:GetAttribute("Difficulty") == 0 do taskwait(0.05) end 
-	
-	env.lasttime = ostime()
-	env.timer = 0
-	env.waveinfo = 1
-	
-	taskwait(0.1)
+    updatelog(`Voting difficulty: {diff}`)
+
+    local voteSuccess, voteErr = pcall(function()
+        bytenet.DifficultyVote.Vote.send(diff)
+    end)
+
+    if not voteSuccess then
+        updatelog(`Difficulty vote failed: {tostring(voteErr)}`)
+        return false
+    end
+
+    updatelog(`Vote sent for {diff} - waiting for confirmation`)
+
+    local start = tick()
+    local MAX_WAIT = 15  -- seconds timeout
+
+    while #mapinfo:GetAttribute("Difficulty") == 0 do
+        if tick() - start > MAX_WAIT then
+            updatelog("Difficulty confirmation timeout - assuming failed")
+            return false
+        end
+        task.wait(0.05)
+    end
+
+    local confirmedDiff = mapinfo:GetAttribute("Difficulty")
+    updatelog(`Difficulty confirmed: {confirmedDiff}`)
+
+    -- Only reset timer/wave after confirmation
+    env.lasttime = ostime()
+    env.timer = 0
+    env.waveinfo = 1
+
+    task.wait(0.1)
+    return true
 end
 
 -- :Ready - sends ready vote when time/wave reached
+-- Improvements:
+--   - Uses pcall to prevent crash if remote fails
+--   - Adds log if vote was sent successfully
+--   - Returns true/false so macros can react (e.g. retry or skip)
+--   - Small delay after vote to let server process (optional but helps stability)
+-- What it still DOESN'T do:
+--   - Doesn't wait for server confirmation (no "ready" attribute to check)
+--   - Doesn't retry if vote fails
+
 function api:Ready(time: number, wave: number)
-	if waitTime(time, wave) then updatelog("Sent ready vote") bytenet.ReadyVote.Vote.send(true) end
+    if not waitTime(time, wave) then
+        updatelog("Ready skipped - round ended or timeout")
+        return false
+    end
+
+    local success, err = pcall(function()
+        bytenet.ReadyVote.Vote.send(true)
+    end)
+
+    if success then
+        updatelog("Sent ready vote")
+        task.wait(0.15)  -- small buffer for server ack
+        return true
+    else
+        updatelog(`Ready vote failed: {tostring(err)}`)
+        return false
+    end
 end
 
 -- :Skip - fires wave skip remote
