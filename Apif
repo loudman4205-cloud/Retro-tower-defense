@@ -132,7 +132,6 @@ end
 window:ShowTab(logtab)
 updatelog("Voting")
 
--- Wait helper - blocks until wave and time are reached
 function waitTime(time, wave)
     local startTick = tick()
     local MAX_WAIT = 60
@@ -199,27 +198,27 @@ function api:Start()
 	end)
 end
 
-even if it skips in-game).
-
-Let me know what print(game.PlaceId) shows in lobby and in match — that will confirm the root cause 100%. We'll get your UI and macro running smooth again.Same for this too: -- :Difficulty - votes difficulty and resets timer/wave to 0/1 after vote
+-- :Difficulty - votes difficulty and resets timer/wave to 0/1 after vote
 -- Waits until difficulty attribute updates
 -- What it DOESN'T do: Doesn't verify if vote succeeded, assumes difficulty string is valid
 function api:Difficulty(diff: string)
-    updatelog(Voted difficulty {diff})
-    bytenet.DifficultyVote.Vote.send(diff)
-    
-    while #mapinfo:GetAttribute("Difficulty") == 0 do taskwait(0.05) end
-    
-    env.lasttime = ostime()
-    env.timer = 0
-    env.waveinfo = 1
-    
-    taskwait(0.1)
+	updatelog(`Voted difficulty {diff}`)
+	bytenet.DifficultyVote.Vote.send(diff)
+	
+	while #mapinfo:GetAttribute("Difficulty") == 0 do taskwait(0.05) end 
+	
+	env.lasttime = ostime()
+	env.timer = 0
+	env.waveinfo = 1
+	
+	taskwait(0.1)
 end
+
 -- :Ready - sends ready vote when time/wave reached
 function api:Ready(time: number, wave: number)
-    if waitTime(time, wave) then updatelog("Sent ready vote") bytenet.ReadyVote.Vote.send(true) end
+	if waitTime(time, wave) then updatelog("Sent ready vote") bytenet.ReadyVote.Vote.send(true) end
 end
+
 -- :Skip - fires wave skip remote
 function api:Skip(time: number, wave: number)
 	if waitTime(time, wave) then updatelog(`Skipping Wave {wave}`) replicatedstorage:WaitForChild("ByteNetReliable"):FireServer(buffer.fromstring("\148\001")) end
@@ -273,20 +272,22 @@ function api:Sell(tower: number, time: number, wave: number)
 	end
 end
 
+-- :PlayAgain - waits for round end, resets state, votes restart
 -- What it DOESN'T do: Doesn't wait for vote confirmation, no timeout
 function api:PlayAgain()
-    while not isroundover do taskwait(0.1) end
-    
-    env.firsttower = env.totalplacedtowers + 1
-    
-    env.lasttime = ostime()
-    env.timer = 0
-    env.waveinfo = 1
-    
-    taskwait(1)
-    
-    bytenet.RoundResult.VoteForRestart.send(true)
-    updatelog("Voted for restart")
-    --print('vote restart success:')
+	while not isroundover do taskwait(0.1) end
+	
+	env.firsttower = env.totalplacedtowers + 1
+	
+	env.lasttime = ostime()
+	env.timer = 0
+	env.waveinfo = 1
+	
+	taskwait(1)
+	
+	bytenet.RoundResult.VoteForRestart.send(true)
+	updatelog("Voted for restart")
+	--print('vote restart success:')
 end
+
 return api
