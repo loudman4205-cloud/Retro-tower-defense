@@ -329,60 +329,20 @@ function api:Sell(tower: number, time: number, wave: number)
 	end
 end
 
--- Improved api:PlayAgain - waits for vote confirmation + timeout safety
--- What it does now:
---   - Times out initial round-end wait after 60s (prevents hang if round stuck)
---   - After voting: waits for RoundResult UI to hide (vote accepted + restart starting)
---   - Confirms restart by checking new wave starts (mapinfo Wave resets to 1 or similar)
---   - Resets state only after full confirmation
---   - Uses pcall on vote to avoid crashes
--- What it still DOESN'T do:
---   - Doesn't force-restart if vote fails (relies on server vote system)
---   - Assumes RoundResult hides on successful restart (game-specific)
-
+-- What it DOESN'T do: Doesn't wait for vote confirmation, no timeout
 function api:PlayAgain()
-    -- Phase 1: Wait for round end with timeout
-    local startWait = tick()
-    while not env.isroundover and tick() - startWait < 60 do
-        task.wait(0.1)
-    end
-    if not env.isroundover then
-        updatelog("PlayAgain timeout - round didn't end")
-        return false  -- Failed, don't reset state
-    end
-    updatelog("Round ended - voting restart")
-
-    -- Phase 2: Vote with safety
-    local voteSuccess = pcall(bytenet.RoundResult.VoteForRestart.send, true)
-    if not voteSuccess then
-        updatelog("Vote failed - retry manually")
-        return false
-    end
-    updatelog("Voted for restart")
-
-    -- Phase 3: Wait for confirmation (UI hides + new round starts)
-    startWait = tick()
-    while roundresultui.Visible and tick() - startWait < 30 do  -- Wait for UI to hide
-        task.wait(0.2)
-    end
-    if roundresultui.Visible then
-        updatelog("Restart UI didn't hide - may have failed")
-        return false
-    end
-
-    -- Wait a bit more for new round init (wave resets)
-    task.wait(2)
-    startWait = tick()
-    while (mapinfo:GetAttribute("Wave") or 0) <= 1 and tick() - startWait < 20 do
-        task.wait(0.5)
-    end
-
-    -- Confirmed: reset state
-    env.firsttower = env.totalplacedtowers + 1
-    env.lasttime = os.time()
-    env.timer = 0
-    env.waveinfo = 1
-
-    updatelog("Restart confirmed - state reset")
-    return true  -- Success
+    while not isroundover do taskwait(0.1) end
+    
+    env.firsttower = env.totalplacedtowers + 1
+    
+    env.lasttime = ostime()
+    env.timer = 0
+    env.waveinfo = 1
+    
+    taskwait(1)
+    
+    bytenet.RoundResult.VoteForRestart.send(true)
+    updatelog("Voted for restart")
+    --print('vote restart success:')
 end
+return api
