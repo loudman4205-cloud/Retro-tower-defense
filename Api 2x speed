@@ -172,7 +172,7 @@ end
 -- Timer multiplier is 3× (not 2× like some other versions)
 -- What it DOESN'T do: Doesn't handle timescale failures, no error logging
 function api:Start()
-	bytenet.Timescale.SetTimescale.send(3)
+	bytenet.Timescale.SetTimescale.send(2)
 
 	env.waveinfo = mapinfo:GetAttribute("Wave") or 1
 	env.timer = 0
@@ -190,7 +190,7 @@ function api:Start()
 	task.spawn(function()
 		lasttime = ostime()
 		while env.lasttime do
-			env.timer = (ostime() - env.lasttime) * 3
+			env.timer = (ostime() - env.lasttime) * 2
 			--print(string.format("Timer: %.1f | Wave: %d", timer, waveinfo))
 			
 			taskwait(0.25)
